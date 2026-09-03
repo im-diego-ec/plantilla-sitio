@@ -1,0 +1,266 @@
+# ---------------------------------------------------------------------------
+# PERSONALIZAR ESTE PROYECTO. Es el segundo y ultimo clic.
+#
+# DONDE VIVE ESTE ARCHIVO: en los repositorios PLANTILLA, que son proyectos ya
+# generados. No en el marco. El marco lo escribe cuando los regenera.
+#
+# POR QUE EL PROYECTO LLEGA POR COPIA Y NO SE ARMA ACA, y esto no es una
+# preferencia: el GITHUB_TOKEN NO PUEDE crear ni modificar archivos de workflow
+# --medido contra GitHub: "refusing to allow a GitHub App to create or update
+# workflow ... without workflows permission"--. Un proyecto armado desde cero por
+# un runner nunca podria escribir su propio `ci.yml`.
+#
+# La salida es que los workflows lleguen con la COPIA DEL TEMPLATE, que no es un
+# push y por lo tanto no tiene ese limite. Por eso los workflows de este proyecto
+# derivan el nombre y el duenio del contexto de GitHub: llegan correctos a
+# cualquier repositorio sin que nadie los toque, que es justo lo que hace falta
+# cuando nadie PUEDE tocarlos.
+#
+# LO QUE ESTE WORKFLOW SI HACE, y todo esta permitido: reescribe los archivos que
+# no son workflows con los valores de verdad, y se borra a si mismo al final
+# --borrar un workflow SI se puede, tambien medido--.
+# ---------------------------------------------------------------------------
+name: Personalizar mi proyecto
+
+on:
+  workflow_dispatch:
+    inputs:
+      plataforma:
+        description: "Donde van a vivir tus datos"
+        type: choice
+        required: true
+        default: "Supabase (gratis para empezar, trae las cuentas de usuario hechas)"
+        options:
+          - "Supabase (gratis para empezar, trae las cuentas de usuario hechas)"
+          - "Todavia no se (lo decido mas adelante)"
+      equipo:
+        description: "Trabajas solo o hay otra persona que revisa"
+        type: choice
+        required: true
+        default: "solo"
+        options:
+          - "solo"
+          - "hay otra persona"
+      companero:
+        description: "Si hay otra persona: su usuario de GitHub, sin la arroba"
+        type: string
+        required: false
+        default: ""
+      dominio:
+        description: "Si ya tenes un dominio propio, escribilo (miproyecto.com). Si no, dejalo vacio"
+        type: string
+        required: false
+        default: ""
+
+permissions:
+  contents: write
+
+jobs:
+  personalizar:
+    name: Personalizar mi proyecto
+    # No corre en el repositorio plantilla: ahi borraria la plantilla. Es la
+    # misma senial que usa la puerta del marco, y no depende de ninguna cuenta.
+    if: github.event.repository.is_template != true
+    permissions:
+      contents: write
+      # `issues: write` crea las etiquetas de area. `actions: write` dispara el
+      # workflow que genera el artefacto del marco. Son las DOS UNICAS tareas del
+      # arranque que el GITHUB_TOKEN puede hacer: el ruleset de la rama y
+      # Dependabot exigen `administration`, y los secretos exigen `secrets`, y
+      # ninguno de los tres existe entre los permisos que `permissions:` admite.
+      # Lo que no se puede hacer queda impreso al final, con el motivo.
+      issues: write
+      actions: write
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Traer este proyecto
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - name: Averiguar que version del marco declara ESTE proyecto
+        # NO SE CABLEA NI SE USA `main`, y el motivo lo enseño una corrida real:
+        # con `main` el proyecto nacio con un `.projects/AGENTS-marco.md` de la
+        # version en desarrollo mientras su propio `ci.yml` pinaba v1.8.0, y el
+        # job de la constitucion lo rechazo con «difiere del texto que el marco
+        # publica para la version 1.7.0». El artefacto tiene que venir de la MISMA
+        # version que el proyecto declara, y esa version esta escrita en su
+        # `ci.yml`: se lee de ahi en vez de repetirla en un segundo lugar donde
+        # los dos pueden divergir.
+        id: version
+        run: |
+          set -euo pipefail
+          VERSION="$(grep -oE 'Projects/\.github/workflows/marco-ci\.yml@[^"]+' .github/workflows/ci.yml | head -1 | sed 's/.*@//')"
+          if [ -z "${VERSION}" ]; then
+            echo "::error::no pude leer que version del marco pina .github/workflows/ci.yml. Sin eso, traer el marco seria adivinar."
+            exit 1
+          fi
+          echo "la version que este proyecto declara: ${VERSION}"
+          echo "ref=${VERSION}" >> "${GITHUB_OUTPUT}"
+
+      - name: Traer el marco, en la version que este proyecto declara
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          repository: im-diego-ec/Projects
+          ref: ${{ steps.version.outputs.ref }}
+          path: .marco
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with: { node-version: "22" }
+
+      - name: Traducir lo que elegiste
+        env:
+          ENTRADA_FORMA: sitio
+          ENTRADA_PLATAFORMA: ${{ startsWith(inputs.plataforma, 'Todavia') && 'ninguna' || 'supabase' }}
+          ENTRADA_EQUIPO: ${{ inputs.equipo == 'hay otra persona' && 'equipo' || 'solo' }}
+          ENTRADA_COMPANERO: ${{ inputs.companero }}
+          ENTRADA_DOMINIO: ${{ inputs.dominio }}
+          ES_TEMPLATE: ${{ github.event.repository.is_template }}
+          # GitHub ya sabe si esta cuenta es de una persona o de una
+          # organizacion. Decide que forma de CODEOWNERS reparte el andamio: en
+          # una cuenta de usuario los equipos NO EXISTEN, y un CODEOWNERS con
+          # `@cuenta/equipo` no asigna a nadie, nunca, sin decir una palabra.
+          TIPO_DE_DUENIO: ${{ github.event.repository.owner.type }}
+        run: node .marco/herramientas/projects-puerta.mjs "${RUNNER_TEMP}"
+
+      - name: Armar el proyecto con tus valores
+        run: |
+          mkdir -p "${RUNNER_TEMP}/proyecto"
+          node .marco/herramientas/projects-init.mjs \
+            --valores "${RUNNER_TEMP}/valores.json" \
+            --destino "${RUNNER_TEMP}/proyecto" \
+            --sin-arranque
+
+      - name: Poner tus valores, sin tocar los workflows
+        # LOS WORKFLOWS NO SE TOCAN, y no es prolijidad: el GITHUB_TOKEN no puede
+        # modificarlos. Llegaron correctos con la copia --derivan el nombre y el
+        # duenio del contexto-- asi que no hace falta.
+        run: |
+          set -euo pipefail
+          # El marco se guarda aparte ANTES de vaciar: el paso que renderiza la
+          # constitucion lo necesita, y `.marco` cae dentro del borrado.
+          mv .marco "${RUNNER_TEMP}/marco"
+          # Se vacia todo menos `.git` y `.github/workflows`.
+          find . -mindepth 1 -maxdepth 1 -not -name '.git' -not -name '.github' -exec rm -rf {} +
+          find .github -mindepth 1 -maxdepth 1 -not -name 'workflows' -exec rm -rf {} +
+          # Y al proyecto recien armado se le sacan SUS workflows ANTES de copiar,
+          # que es mas claro que copiarlos y despues restaurar los de aca.
+          rm -rf "${RUNNER_TEMP}/proyecto/.github/workflows"
+          cp -a "${RUNNER_TEMP}/proyecto/." .
+          cp "${RUNNER_TEMP}/desvios.json" .projects-desvios.json
+          # Vuelve, con nombre distinto para que no lo confunda nadie con el clon
+          # de trabajo. El paso que borra este workflow lo saca despues.
+          cp -a "${RUNNER_TEMP}/marco" .marco-verificacion
+          echo "workflows que sobrevivieron intactos:"
+          ls .github/workflows
+
+      - name: Renderizar la constitucion con los desvios adentro
+        # EL DEFECTO QUE ESTO CIERRA, aislado midiendo un proyecto real: el
+        # artefacto que quedaba en el repositorio coincidia EXACTAMENTE con el
+        # render SIN desvios, y el CI espera el que SI los tiene. Cuarenta lineas
+        # de diferencia: los cinco desvios, en las dos superficies.
+        #
+        # LA CAUSA es de orden, no de contenido: `projects-init` renderiza el
+        # artefacto ANTES de que `.projects-desvios.json` exista en el destino
+        # --lo escribe el paso siguiente-- asi que renderiza sin ellos. Quien lo
+        # arreglaba era `actualizar-marco.yml`, y ese workflow no puede abrir su
+        # PR solo mientras la casilla de Actions este apagada. Resultado: el
+        # proyecto nacia con el CI en rojo por un desfase que nadie iba a cerrar.
+        #
+        # Aca ya estan las dos cosas --el artefacto y los desvios-- asi que se
+        # renderiza de nuevo y el proyecto nace consistente.
+        env:
+          CONSTITUCION_MODO: escribir
+        run: node .marco-verificacion/actions/constitucion/constitucion.mjs
+
+      - name: Borrar este workflow, que ya cumplio
+        # Borrar SI se puede con el GITHUB_TOKEN. Crear y modificar no. Se borra
+        # para que nadie lo vuelva a correr sobre un proyecto ya personalizado.
+        run: |
+          rm -f .github/workflows/personalizar.yml
+          rm -rf .marco-verificacion
+
+      - name: Guardarlo
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "Mi proyecto, con mis valores"
+          git push
+
+      - name: Crear las etiquetas de area
+        # SE CREAN ACA Y NO SE IMPRIMEN COMO TAREA, que es lo que hacia el init:
+        # seis comandos para copiar y pegar. Son mecanicas, no tienen ninguna
+        # decision adentro, y el token puede.
+        #
+        # Si la etiqueta ya existe, `gh` sale distinto de cero y eso NO es un
+        # fallo del arranque: volver a correr esto tiene que ser inofensivo.
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # La descripcion NO repite el prefijo: `$1` ya viene como "area:backend",
+          # asi que "Area: $1" salia "Area: area:backend". Se usa `$3`.
+          crear() {
+            if gh label create "$1" --color "$2" --description "Area: $3" 2>/dev/null; then
+              echo "  creada: $1"
+            else
+              echo "  ya estaba: $1"
+            fi
+          }
+          crear "area:backend"   0052CC "backend"
+          crear "area:ci-cd"     006B75 "ci-cd"
+          crear "area:datos"     FBCA04 "datos"
+          crear "area:frontend"  1D76DB "frontend"
+          crear "area:infra"     5319E7 "infra"
+          crear "area:seguridad" B60205 "seguridad"
+
+      - name: Pedir el artefacto del marco
+        # El proyecto necesita `.projects/AGENTS-marco.md` renderizado por el
+        # marco. Lo genera su propio `actualizar-marco.yml`, que hasta ahora habia
+        # que disparar a mano.
+        #
+        # Si el disparo falla --el workflow todavia no esta indexado, cosa que
+        # pasa en los primeros segundos de un repositorio nuevo-- el proyecto
+        # igual quedo armado. Se dice y se sigue, en vez de tirar abajo todo el
+        # arranque por un paso que la persona repite con un clic.
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if gh workflow run actualizar-marco.yml 2>/dev/null; then
+            echo "  pedido: el artefacto del marco se esta generando"
+          else
+            echo "::warning::no pude disparar actualizar-marco.yml todavia. No es un fallo: tu proyecto ya esta armado. Corrilo desde la pestania Actions cuando aparezca en la lista."
+          fi
+
+      - name: Decir que quedo y que sigue
+        run: |
+          {
+            echo "## Tu proyecto esta listo"
+            echo ""
+            echo "Volve a la portada del repositorio. Lo primero que conviene abrir es **README.md**."
+            echo ""
+            echo "Lo que el marco todavia no puede resolver solo quedo anotado en \`.projects-desvios.json\`."
+            echo ""
+            echo "### Lo que ya se hizo por vos"
+            echo ""
+            echo "- Los archivos del proyecto, con tus valores."
+            echo "- Las seis etiquetas de area."
+            echo "- El pedido del artefacto del marco."
+            echo ""
+            echo "### Lo que queda, y por que no se pudo hacer solo"
+            echo ""
+            echo "Tres cosas necesitan permisos que el token de Actions NO PUEDE tener. No es un"
+            echo "olvido: \`administration\` y \`secrets\` no existen entre los permisos que un"
+            echo "workflow puede pedir."
+            echo ""
+            echo "| Que | Donde | Por que no se pudo |"
+            echo "|---|---|---|"
+            echo "| Proteger la rama main | Settings, Rules, Rulesets | exige administration |"
+            echo "| Encender Dependabot | Settings, Advanced Security | exige administration |"
+            echo "| Cargar los secretos para publicar | Settings, Secrets and variables, Actions | exige secrets, y los valores solo los tenes vos |"
+            echo "| Dejar que Actions abra pull requests | Settings, Actions, General, Workflow permissions | exige administration |"
+            echo ""
+            echo "La ultima explica algo que vas a ver enseguida: el workflow que trae al dia la"
+            echo "constitucion empuja su rama bien, pero no puede abrir el pull request solo hasta"
+            echo "que tildes esa casilla. Deja el enlace para abrirlo con un clic, y no se pone en"
+            echo "rojo por eso: su trabajo si se hizo."
+          } >> "${GITHUB_STEP_SUMMARY}"
