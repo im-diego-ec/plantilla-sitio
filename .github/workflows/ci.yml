@@ -108,7 +108,7 @@ jobs:
       # La action necesita node en el PATH y lo dice con el arreglo escrito si no
       # esta. No hace falta pnpm ni instalar dependencias: esto lee y renderiza
       # texto, no interroga al toolchain del proyecto.
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
         with:
           node-version: "24"
       - id: marco_constitucion
@@ -120,7 +120,7 @@ jobs:
       # a mano, y esa es la salida que el mensaje de fallo promete. Sin
       # if: !cancelled() no se subiria justo en la corrida que lo necesita.
       - if: "!cancelled()"
-        uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: constitucion-al-dia
           path: ${{ steps.marco_constitucion.outputs.corregidos }}
@@ -149,7 +149,7 @@ jobs:
       # corepack en vez de una action de terceros: menos superficie que auditar
       # y una dependencia menos que pinear por SHA.
       - run: corepack enable
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
         with:
           node-version: "24"
       # SIN `cache: pnpm` EN EL SETUP-NODE DE ARRIBA, y es una decision escrita,
